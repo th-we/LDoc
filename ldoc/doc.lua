@@ -451,7 +451,7 @@ end
 
 function Item:trailing_warning (kind,tag,rest)
    if type(rest)=='string' and #rest > 0 then
-      Item.warning(self,kind.." tag: '"..tag..'" has trailing text ; use not_luadoc=true if you want description to continue between tags\n"'..rest..'"')
+      Item.warning(self,kind.." tag: '"..tag.."' has trailing text ; use not_luadoc=true if you want description to continue between tags\n'"..rest.."'")
    end
 end
 
@@ -1085,7 +1085,7 @@ function Module:process_see_reference (s,modules,istype)
    local ref = custom_see_references(s)
    if ref then return ref end
    if not s:match '^[%w_%.%:%-]+$' or not s:match '[%w_]$' then
-      return nil, "malformed see reference: '"..s..'"'
+      return nil, "malformed see reference: '"..s.."'"
    end
 
    -- `istype` means that we are looking up strictly in a _type_ context, so then only
