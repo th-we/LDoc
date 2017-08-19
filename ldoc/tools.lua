@@ -14,7 +14,6 @@ local M = tools
 local append = table.insert
 local lexer = require 'ldoc.lexer'
 local quit = utils.quit
-local lfs = require 'lfs'
 
 -- at rendering time, can access the ldoc table from any module item,
 -- or the item itself if it's a module
@@ -109,7 +108,6 @@ function KindMap:add (item,items,description)
    local group = item[self.fieldname] -- which wd be item's type or section
    local kname = self.klass.types_by_tag[group] -- the kind name
    if not self[kname] then
-    -- print(kname,group,self.fieldname)
       self[kname] = M.type_iterator (items,self.fieldname,group)
       self.klass.descriptions[kname] = description
    end
@@ -225,7 +223,9 @@ end
 
 function M.check_directory(d)
    if not path.isdir(d) then
-      lfs.mkdir(d)
+      if not dir.makepath(d) then
+         quit("Could not create "..d.." directory")
+      end
    end
 end
 
@@ -242,8 +242,11 @@ function M.check_file (f,original)
 end
 
 function M.writefile(name,text)
-   local ok,err = utils.writefile(name,text)
+   local f,err = io.open(name,"wb")
+--~    local ok,err = utils.writefile(name,text)
    if err then quit(err) end
+   f:write(text)
+   f:close()
 end
 
 function M.name_of (lpath)

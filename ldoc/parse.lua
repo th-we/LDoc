@@ -121,6 +121,10 @@ function Tags:iter ()
    return self._order:iter()
 end
 
+local function comment_contains_tags (comment,args)
+   return (args.colon and comment:find ': ') or (not args.colon and comment:find '@')
+end
+
 -- This takes the collected comment block, and uses the docstyle to
 -- extract tags and values.  Assume that the summary ends in a period or a question
 -- mark, and everything else in the preamble is the description.
@@ -193,6 +197,7 @@ local function parse_file(fname, lang, package, args)
    function F:warning (msg,kind,line)
       kind = kind or 'warning'
       line = line or lineno()
+      Item.had_warning = true
       io.stderr:write(fname..':'..line..': '..msg,'\n')
    end
 
@@ -225,9 +230,14 @@ local function parse_file(fname, lang, package, args)
          return nil
       end
    end
-   if lang.parse_module_call and t ~= 'comment'then
-      while t and not (t == 'iden' and v == 'module') do
-         t,v = tnext(tok)
+   if lang.parse_module_call and t ~= 'comment' then
+      local prev_token
+      while t do
+         if prev_token ~= '.' and prev_token ~= ':' and t == 'iden' and v == 'module' then
+            break
+         end
+         prev_token = t
+         t, v = tnext(tok)
       end
       if not t then
          if not args.ignore then
@@ -236,7 +246,7 @@ local function parse_file(fname, lang, package, args)
          --return nil
       else
          mod,t,v = lang:parse_module_call(tok,t,v)
-         if mod ~= '...' then
+         if mod and mod ~= '...' then
             add_module(Tags.new{summary='(no description)'},mod,true)
             first_comment = false
             module_found = true
@@ -271,7 +281,7 @@ local function parse_file(fname, lang, package, args)
 
          if t == 'space' then t,v = tnext(tok) end
 
-         local item_follows, tags, is_local, case
+         local item_follows, tags, is_local, case, parse_error
          if ldoc_comment then
             comment = table.concat(comment)
             if comment:match '^%s*$' then
@@ -283,21 +293,29 @@ local function parse_file(fname, lang, package, args)
                first_comment = false
             else
                item_follows, is_local, case = lang:item_follows(t,v,tok)
+               if not item_follows then
+                  parse_error = is_local
+                  is_local = false
+               end
             end
-            if item_follows or comment:find '@' or comment:find ': ' then
+
+            if item_follows or comment_contains_tags(comment,args) then
                tags = extract_tags(comment,args)
+
                -- explicitly named @module (which is recommended)
                if doc.project_level(tags.class) then
                   module_found = tags.name
                   -- might be a module returning a single function!
                   if tags.param or tags['return'] then
                      local parms, ret, summ = tags.param, tags['return'],tags.summary
+                     local name = tags.name
                      tags.param = nil
                      tags['return'] = nil
-                     tags.summary = nil
-                     add_module(tags,tags.name,false)
+                     tags['class'] = nil
+                     tags['name'] = nil
+                     add_module(tags,name,false)
                      tags = {
-                        summary = summ,
+                        summary = '',
                         name = 'returns...',
                         class = 'function',
                         ['return'] = ret,
@@ -308,13 +326,21 @@ local function parse_file(fname, lang, package, args)
                doc.expand_annotation_item(tags,current_item)
                -- if the item has an explicit name or defined meaning
                -- then don't continue to do any code analysis!
+               -- Watch out for the case where there are field or param tags
+               -- but no class, since these will be fixed up later as module/class
+               -- entities
+               if (tags.field or tags.param) and not tags.class then
+                  parse_error = false
+               end
                if tags.name then
                   if not tags.class then
                      F:warning("no type specified, assuming function: '"..tags.name.."'")
                      tags:add('class','function')
                   end
-                  item_follows, is_local = false, false
-                elseif lang:is_module_modifier (tags) then
+                  item_follows, is_local, parse_error = false, false, false
+               elseif args.no_args_infer then
+                  F:error("No name and type provided (no_args_infer)")
+               elseif lang:is_module_modifier (tags) then
                   if not item_follows then
                      F:warning("@usage or @export followed by unknown code")
                      break
@@ -330,6 +356,9 @@ local function parse_file(fname, lang, package, args)
                      ldoc_comment = false
                   end
                end
+            end
+            if parse_error then
+               F:warning('definition cannot be parsed - '..parse_error)
             end
          end
          -- some hackery necessary to find the module() call
@@ -359,6 +388,8 @@ local function parse_file(fname, lang, package, args)
                if item_follows then -- parse the item definition
                   local err = item_follows(tags,tok)
                   if err then F:error(err) end
+               elseif parse_error then
+                  F:warning('definition cannot be parsed - '..parse_error)
                else
                   lang:parse_extra(tags,tok,case)
                end

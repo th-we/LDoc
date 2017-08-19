@@ -27,17 +27,18 @@ local tablex = require 'pl.tablex'
 
 -- Penlight compatibility
 utils.unpack = utils.unpack or unpack or table.unpack
-
 local append = table.insert
-
 local lapp = require 'pl.lapp'
+
+local version = '1.4.6'
 
 -- so we can find our private modules
 app.require_here()
 
 --- @usage
 local usage = [[
-ldoc, a documentation generator for Lua, vs 1.4.3
+ldoc, a documentation generator for Lua, vs ]]..version..[[
+
   -d,--dir (default doc) output directory
   -o,--output  (default 'index') output name
   -v,--verbose          verbose
@@ -57,6 +58,7 @@ ldoc, a documentation generator for Lua, vs 1.4.3
   -X,--not_luadoc break LuaDoc compatibility. Descriptions may continue after tags.
   -D,--define (default none) set a flag to be used in config.ld
   -C,--colon use colon style
+  -N,--no_args_infer  don't infer arguments from source
   -B,--boilerplate ignore first comment in source files
   -M,--merge allow module merging
   -S,--simple no return or params, no summary
@@ -66,6 +68,8 @@ ldoc, a documentation generator for Lua, vs 1.4.3
   --filter (default none) filter output as Lua data (e.g pl.pretty.dump)
   --tags (default none) show all references to given tags, comma-separated
   --fatalwarnings non-zero exit status on any warning
+  --testing  reproducible build; no date or version on output
+
   <file> (string) source file or directory containing source
 
   `ldoc .` reads options from an `config.ld` file in same directory;
@@ -101,8 +105,6 @@ function ProjectMap:_init ()
    self.fieldname = 'type'
 end
 
-
-
 local lua, cc = lang.lua, lang.cc
 
 local file_types = {
@@ -120,7 +122,7 @@ local file_types = {
 ------- ldoc external API ------------
 
 -- the ldoc table represents the API available in `config.ld`.
-local ldoc = { charset = 'UTF-8' }
+local ldoc = { charset = 'UTF-8', version = version }
 
 local known_types, kind_names = {}
 
@@ -238,6 +240,8 @@ local ldoc_contents = {
    'unqualified', 'custom_display_name_handler', 'kind_names', 'custom_references',
    'dont_escape_underscore','global_lookup','prettify_files','convert_opt', 'user_keywords',
    'postprocess_html',
+   'custom_css','version',
+   'no_args_infer'
 }
 ldoc_contents = tablex.makeset(ldoc_contents)
 
@@ -422,6 +426,7 @@ local process_file_list = tools.process_file_list
 
 setup_package_base()
 
+override 'no_args_infer'
 override 'colon'
 override 'merge'
 override 'not_luadoc'
@@ -769,7 +774,8 @@ end
 local builtin_style, builtin_template = match_bang(args.style),match_bang(args.template)
 if builtin_style or builtin_template then
    -- '!' here means 'use built-in templates'
-   local tmpdir = path.join(path.is_windows and os.getenv('TMP') or '/tmp','ldoc')
+   local user = path.expanduser('~'):gsub('[/\\: ]','_')
+   local tmpdir = path.join(path.is_windows and os.getenv('TMP') or '/tmp','ldoc'..user)
    if not path.isdir(tmpdir) then
       lfs.mkdir(tmpdir)
    end
@@ -805,10 +811,18 @@ ldoc.title = ldoc.title or args.title
 ldoc.project = ldoc.project or args.project
 ldoc.package = args.package:match '%a+' and args.package or nil
 
-if args.date == 'system' then
-   ldoc.updatetime = os.date("%Y-%m-%d %H:%M:%S")
+local source_date_epoch = os.getenv("SOURCE_DATE_EPOCH")
+if args.testing then
+   ldoc.updatetime = "2015-01-01 12:00:00"
+   ldoc.version = 'TESTING'
+elseif source_date_epoch == nil then
+  if args.date == 'system' then
+    ldoc.updatetime = os.date("%Y-%m-%d %H:%M:%S")
+  else
+    ldoc.updatetime = args.date
+  end
 else
-   ldoc.updatetime = args.date
+  ldoc.updatetime = os.date("!%Y-%m-%d %H:%M:%S",source_date_epoch)
 end
 
 local html = require 'ldoc.html'

@@ -6,6 +6,7 @@ local class = require 'pl.class'
 local utils = require 'pl.utils'
 local List = require 'pl.List'
 local Map = require 'pl.Map'
+local text = require 'pl.text'
 
 local doc = {}
 local global = require 'ldoc.builtin.globals'
@@ -23,9 +24,9 @@ local TAG_MULTI,TAG_ID,TAG_SINGLE,TAG_TYPE,TAG_FLAG,TAG_MULTI_LINE = 'M','id','S
 --  - 'T' tags which represent a type, like 'function' (TAG_TYPE)
 local known_tags = {
    param = 'M', see = 'M', comment = 'M', usage = 'ML', ['return'] = 'M', field = 'M', author='M',set='M';
-   class = 'id', name = 'id', pragma = 'id', alias = 'id', within = 'id',
+   class = 'id', name = 'id', pragma = 'id', alias = 'id',
    copyright = 'S', summary = 'S', description = 'S', release = 'S', license = 'S',
-   fixme = 'S', todo = 'S', warning = 'S', raise = 'S', charset = 'S',
+   fixme = 'S', todo = 'S', warning = 'S', raise = 'S', charset = 'S', within = 'S',
    ['local'] = 'N', export = 'N', private = 'N', constructor = 'N', static = 'N',include = 'S',
    -- project-level
    module = 'T', script = 'T', example = 'T', topic = 'T', submodule='T', classmod='T', file='T',
@@ -294,6 +295,8 @@ function File:finish()
             end
             item.display_name = display_name
             this_mod.section = item
+            -- the purpose of this little hack is to properly distinguish
+            -- between built-in kinds and any user-defined kinds.
             this_mod.kinds:add_kind(display_name,display_name..' ',nil,item)
             this_mod.sections:append(item)
             this_mod.sections.by_name[lookup_name:gsub('%A','_')] = item
@@ -360,7 +363,7 @@ function File:finish()
                      end
                      -- Whether to use '.' or the language's version of ':' (e.g. \ for Moonscript)
                      item.name = class..(not static and this_mod.file.lang.method_call or '.')..item.name
-                  end
+                   end
                   if stype == 'factory'  then
                      if item.tags.private then to_be_removed = true
                      elseif item.type == 'lfunction' then
@@ -406,6 +409,10 @@ function File:finish()
             -- must be a free-standing function (sometimes a problem...)
          end
       end
+      item.names_hierarchy = require('pl.utils').split(
+        item.name,
+        '[.:]'
+      )
    end
 end
 
@@ -536,13 +543,17 @@ function Item.check_tag(tags,tag, value, modifiers)
          if avalue then value = avalue..' '..value end
          if amod then
             modifiers = modifiers or {}
+            local value_tokens = utils.split(value)
             for m,v in pairs(amod) do
-               local idx = v:match('^%$(%d+)')
+               local idx = tonumber(v:match('^%$(%d+)'))
                if idx then
                   v, value = value:match('(%S+)(.*)')
+               --   v = value_tokens[idx]
+               --   value_tokens[idx] = ''
                end
                modifiers[m] = v
             end
+            -- value = table.concat(value_tokens, ' ')
          end
       else -- has to be a function that at least returns tag, value
          return alias(tags,value,modifiers)
@@ -615,6 +626,12 @@ function Item:finish()
    tags.see = read_del(tags,'see')
    if tags.see then
       tags.see = tools.identifier_list(tags.see)
+   end
+   if self.usage then
+      for i = 1,#self.usage do
+         local usage = self.usage[i]:gsub('^%s*\n','')
+         self.usage[i] = text.dedent(usage)
+      end
    end
    if  doc.project_level(self.type) then
       -- we are a module, so become one!
@@ -1252,10 +1269,17 @@ local function dump_tags (tags)
    end
 end
 
+-- ANSI colour codes for making important stuff BOLD
+-- (but not on Windows)
+local bold,default = '\x1B[1m','\x1B[0m'
+if utils.dir_separator == '\\' then
+   bold,default = '',''
+end
+
 function Module:dump(verbose)
    if not doc.project_level(self.type) then return end
    print '----'
-   print(self.type..':',self.name,self.summary)
+   print(self.type..':',bold..self.name,self.summary..default)
    if self.description then print(self.description) end
    dump_tags (self.tags)
    for item in self.items:iter() do
@@ -1280,13 +1304,15 @@ function Item:dump(verbose)
    end
    if verbose then
       print()
+      io.write(bold)
       print(self.type,name)
+      io.write(default)
       print(self.summary)
       if self.description and self.description:match '%S' then
          print 'description:'
          print(self.description)
       end
-      if #self.params > 0 then
+      if self.params and #self.params > 0 then
          print 'parameters:'
          for _,p in ipairs(self.params) do
             print('',p,self.params.map[p])
@@ -1300,7 +1326,7 @@ function Item:dump(verbose)
       end
       dump_tags(self.tags)
    else
-      print('* '..name..' - '..self.summary)
+      print('* '..bold..name..default..' - '..self.summary)
    end
 end
 
@@ -1333,4 +1359,3 @@ function doc.filter_objects_through_function(filter, module_list)
 end
 
 return doc
-
